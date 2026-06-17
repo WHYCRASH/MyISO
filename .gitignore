@@ -1,0 +1,9 @@
+base_iso/
+__pycache__/
+*.iso
+*.qcow2
+*.log
+ssh_keys/
+server.pem
+authorized_keys
+initramfs.conf

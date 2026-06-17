@@ -1,0 +1,54 @@
+# AppArmor profile for MDM Check-In Agent
+# /etc/apparmor.d/usr.local.sbin.checkin.sh
+
+abi <abi/4.0>,
+
+include <tunables/global>
+
+profile checkin /usr/local/sbin/checkin.sh {
+  include <abstractions/base>
+  include <abstractions/nameservice>
+
+  # ---- Allowed: Self and sanitize execution ----
+  /usr/local/sbin/checkin.sh     r,
+  /usr/local/sbin/sanitize.sh    rix,
+
+  # ---- Allowed: curl for HTTPS check-in ----
+  /usr/bin/curl                   rix,
+  /usr/lib/x86_64-linux-gnu/**   mr,
+
+  # ---- Allowed: Read pinned TLS certificate ----
+  /etc/mdm/                      r,
+  /etc/mdm/server.pem            r,
+
+  # ---- Allowed: Logging ----
+  /dev/log                        w,
+  /run/systemd/journal/socket     w,
+
+  # ---- Allowed: Network (outbound TCP for HTTPS) ----
+  network tcp,
+  network inet  stream,
+  network inet6 stream,
+
+  # ---- Allowed: LUKS partition access (for sanitize.sh) ----
+  /dev/nvme0n1p2                  rw,
+
+  # ---- Allowed: sysrq for emergency poweroff ----
+  /proc/sys/kernel/sysrq          w,
+  /proc/sysrq-trigger             w,
+
+  # ---- Allowed: Shell utilities ----
+  /usr/bin/sleep                   rix,
+  /usr/bin/logger                  rix,
+  /usr/bin/dd                      rix,
+  /usr/sbin/cryptsetup             rix,
+  /usr/bin/sync                    rix,
+  /usr/sbin/poweroff               rix,
+
+  # ---- DENY: Defense-in-depth — prevent key/memory dumping ----
+  deny /proc/keys                  r,
+  deny /proc/*/mem                 r,
+  deny /proc/kcore                 r,
+  deny /dev/mem                    rwx,
+  deny /dev/kmem                   rwx,
+}

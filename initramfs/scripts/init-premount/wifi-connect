@@ -1,0 +1,123 @@
+#!/bin/sh
+# initramfs script: wifi-connect (init-premount)
+# Loads iwlwifi, starts wpa_supplicant, gets DHCP, starts Dropbear.
+# NON-BLOCKING: LUKS unlock proceeds regardless of WiFi status.
+#
+# Install to: /etc/initramfs-tools/scripts/init-premount/wifi-connect
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+WPA_CONF="/etc/wpa_supplicant/initramfs.conf"
+WIFI_TIMEOUT=20        # seconds to wait for WiFi association
+DHCP_TIMEOUT=15        # seconds to wait for DHCP lease
+DROPBEAR_PORT=22
+LOG_PREFIX="[wifi-connect]"
+
+log_msg() {
+    echo "${LOG_PREFIX} $1" > /dev/console 2>/dev/null || true
+}
+
+# ============================================================================
+# MAIN — all operations are non-blocking / best-effort
+# ============================================================================
+
+log_msg "Starting pre-boot WiFi and SSH setup..."
+
+# 1. Load Intel WiFi kernel modules
+modprobe cfg80211  2>/dev/null || true
+modprobe mac80211  2>/dev/null || true
+modprobe iwlwifi   2>/dev/null || true
+modprobe iwlmvm    2>/dev/null || true
+
+# Give modules time to initialize and register the wireless interface
+sleep 3
+
+# 2. Detect the wireless interface
+WIFI_IFACE=""
+for iface in /sys/class/net/wl*; do
+    if [ -d "$iface" ]; then
+        WIFI_IFACE=$(basename "$iface")
+        break
+    fi
+done
+
+if [ -z "$WIFI_IFACE" ]; then
+    log_msg "WARNING: No wireless interface found. Continuing boot without WiFi."
+    exit 0
+fi
+
+log_msg "Found wireless interface: ${WIFI_IFACE}"
+
+# 3. Bring up the interface
+ip link set "$WIFI_IFACE" up 2>/dev/null || {
+    log_msg "WARNING: Failed to bring up ${WIFI_IFACE}. Continuing boot."
+    exit 0
+}
+
+# 4. Start wpa_supplicant if config exists
+if [ ! -f "$WPA_CONF" ]; then
+    log_msg "WARNING: No wpa_supplicant config at ${WPA_CONF}. Continuing boot."
+    exit 0
+fi
+
+wpa_supplicant -B -i "$WIFI_IFACE" -c "$WPA_CONF" -D nl80211,wext 2>/dev/null || {
+    log_msg "WARNING: wpa_supplicant failed to start. Continuing boot."
+    exit 0
+}
+
+# 5. Wait for association (non-blocking with timeout)
+WAITED=0
+ASSOCIATED=false
+while [ "$WAITED" -lt "$WIFI_TIMEOUT" ]; do
+    STATUS=$(wpa_cli -i "$WIFI_IFACE" status 2>/dev/null | grep "^wpa_state=" | cut -d= -f2)
+    if [ "$STATUS" = "COMPLETED" ]; then
+        ASSOCIATED=true
+        break
+    fi
+    sleep 1
+    WAITED=$((WAITED + 1))
+done
+
+if [ "$ASSOCIATED" = "false" ]; then
+    log_msg "WARNING: WiFi association timed out after ${WIFI_TIMEOUT}s. Continuing boot."
+    exit 0
+fi
+
+log_msg "WiFi associated on ${WIFI_IFACE}"
+
+# 6. Obtain DHCP lease (background with timeout)
+dhclient -1 -timeout "$DHCP_TIMEOUT" "$WIFI_IFACE" 2>/dev/null || {
+    log_msg "WARNING: DHCP lease failed. Continuing boot."
+    exit 0
+}
+
+IP_ADDR=$(ip -4 addr show "$WIFI_IFACE" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
+log_msg "DHCP lease obtained: ${IP_ADDR:-unknown}"
+
+# 7. Start Dropbear SSH server for remote management
+if command -v dropbear > /dev/null 2>&1; then
+    dropbear -p "$DROPBEAR_PORT" -s -j -k -E 2>/dev/null || {
+        log_msg "WARNING: Dropbear failed to start. Continuing boot."
+        exit 0
+    }
+    log_msg "Dropbear SSH listening on ${IP_ADDR:-unknown}:${DROPBEAR_PORT}"
+else
+    log_msg "WARNING: Dropbear not found in initramfs. Continuing boot."
+fi
+
+log_msg "Pre-boot network setup complete. LUKS unlock proceeds normally."
+exit 0

@@ -1,0 +1,49 @@
+[Unit]
+Description=Self-Hosted MDM Device Check-In Agent
+Documentation=file:///home/shane/TheMasterISO/README-setup.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/mdm/server.pem
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/checkin.sh
+Restart=on-failure
+RestartSec=30
+
+# Run as root (required for cryptsetup erase)
+User=root
+Group=root
+
+# --- Systemd Security Hardening ---
+
+# Network: restrict outbound to management server only
+# IMPORTANT: Replace 203.0.113.1 with your actual VPS IP address
+IPAddressAllow=203.0.113.1/32
+IPAddressDeny=any
+
+# Privilege escalation prevention
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_RAWIO CAP_NET_RAW
+
+# Filesystem protection
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/dev/nvme0n1p2
+ReadOnlyPaths=/etc/mdm /usr/local/sbin/sanitize.sh /usr/local/sbin/checkin.sh
+
+# Kernel protection
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+
+# Execution environment
+PrivateTmp=yes
+PrivateDevices=no
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

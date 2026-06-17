@@ -1,0 +1,72 @@
+#!/bin/sh
+# initramfs hook: wifi-dropbear
+# Bundles wpa_supplicant, dropbear SSH server, and iwlwifi firmware
+# into the initramfs image for pre-boot network access on WiFi-only laptops.
+#
+# Install to: /etc/initramfs-tools/hooks/wifi-dropbear
+
+PREREQ="dropbear"
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# ---- WiFi userspace tools ----
+copy_exec /sbin/wpa_supplicant
+copy_exec /sbin/wpa_cli
+copy_exec /sbin/ip
+copy_exec /sbin/dhclient
+copy_exec /bin/sleep
+
+# ---- Intel WiFi firmware for Dell Latitude 5410 (AX201 / 9560) ----
+# The Latitude 5410 ships with Intel Wi-Fi 6 AX201 or Wireless-AC 9560
+for fw in /lib/firmware/iwlwifi-*.ucode; do
+    if [ -f "$fw" ]; then
+        copy_file firmware "$fw"
+    fi
+done
+
+# Also include the regulatory database for proper channel selection
+for reg in /lib/firmware/regulatory.db /lib/firmware/regulatory.db.p7s; do
+    if [ -f "$reg" ]; then
+        copy_file firmware "$reg"
+    fi
+done
+
+# ---- Kernel modules for Intel WiFi ----
+manual_add_modules iwlwifi
+manual_add_modules iwlmvm
+manual_add_modules cfg80211
+manual_add_modules mac80211
+
+# ---- wpa_supplicant configuration for initramfs ----
+if [ -f /etc/wpa_supplicant/initramfs.conf ]; then
+    mkdir -p "${DESTDIR}/etc/wpa_supplicant"
+    cp /etc/wpa_supplicant/initramfs.conf "${DESTDIR}/etc/wpa_supplicant/initramfs.conf"
+fi
+
+# ---- Dropbear authorized_keys ----
+if [ -f /etc/dropbear/initramfs/authorized_keys ]; then
+    mkdir -p "${DESTDIR}/etc/dropbear"
+    cp /etc/dropbear/initramfs/authorized_keys "${DESTDIR}/etc/dropbear/authorized_keys"
+fi
+
+# ---- dhclient requires a script ----
+copy_exec /sbin/dhclient-script 2>/dev/null || true
+if [ -f /etc/dhcp/dhclient.conf ]; then
+    mkdir -p "${DESTDIR}/etc/dhcp"
+    cp /etc/dhcp/dhclient.conf "${DESTDIR}/etc/dhcp/dhclient.conf"
+fi
+
+# ---- DNS resolution (needed for dhclient) ----
+mkdir -p "${DESTDIR}/etc"
+echo "nameserver 1.1.1.1" > "${DESTDIR}/etc/resolv.conf"

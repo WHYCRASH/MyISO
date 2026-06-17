@@ -1,0 +1,40 @@
+#cloud-config
+# Template for the CIDATA secondary USB drive.
+# Store this file as 'user-data' on a USB drive formatted with FAT32/EXT4
+# and labeled 'CIDATA'. The installer will extract these secrets automatically.
+
+write_files:
+  # 1. Proton Drive Rclone Configuration
+  - path: /home/shane/.config/rclone/rclone.conf
+    owner: shane:shane
+    permissions: '0600'
+    content: |
+      [ProtonDrive]
+      type = protondrive
+      user = your-proton-email@proton.me
+      pass = your_obfuscated_rclone_password_or_token
+      # Alternatively, you can use OpenVPN/Wireguard credentials here.
+
+  # 2. Claude Code API Configuration
+  - path: /home/shane/.config/claude/claude.json
+    owner: shane:shane
+    permissions: '0600'
+    content: |
+      {
+        "oauth": {
+          "accessToken": "your_claude_api_access_token_here",
+          "refreshToken": "your_claude_api_refresh_token_here"
+        },
+        "settings": {
+          "theme": "dark",
+          "editor": "nano"
+        }
+      }
+
+  # 3. ProtonVPN Credentials (Optional: used by vpn-auto.sh)
+  - path: /home/shane/.config/protonvpn/credentials.env
+    owner: root:root
+    permissions: '0600'
+    content: |
+      PVPN_USERNAME=your_protonvpn_openvpn_username
+      PVPN_PASSWORD=your_protonvpn_openvpn_password

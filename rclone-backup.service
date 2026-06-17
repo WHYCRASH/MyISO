@@ -1,0 +1,25 @@
+[Unit]
+Description=Backup ~/.config and ~/.local to Proton Drive via Rclone
+After=network-online.target
+Wants=network-online.target
+AssertPathExists=/home/shane/.config/rclone/rclone.conf
+
+[Service]
+Type=oneshot
+User=shane
+Group=shane
+Environment=HOME=/home/shane
+ExecStart=/usr/bin/rclone sync /home/shane/.config ProtonDrive:Backup/config \
+    --exclude "/rclone/**" \
+    --exclude "/claude/**" \
+    --exclude "/session/**" \
+    --exclude "/google-chrome/**" \
+    --exclude "/microsoft-edge-dev/**" \
+    --fast-list --transfers 4
+ExecStart=/usr/bin/rclone sync /home/shane/.local ProtonDrive:Backup/local \
+    --exclude "/share/Trash/**" \
+    --exclude "/share/containers/**" \
+    --fast-list --transfers 4
+
+[Install]
+WantedBy=multi-user.target

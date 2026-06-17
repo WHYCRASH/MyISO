@@ -1,0 +1,695 @@
+#cloud-config
+autoinstall:
+  version: 1
+  interactive-sections: []
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  identity:
+    hostname: latitude-5410
+    username: shane
+    # Password: sterilepassword (hashed with SHA-512)
+    password: "$6$rounds=40960$sterilepass$WkC6Yn/6qU.QhQWk1e9h3lD2V6yVjIuA8cK8XmS0fL.bA8hW9K4x7DqT2c1gLp3aPqR5zY7j6p4Q1f8U6v4eS."
+  
+  network:
+    version: 2
+    ethernets:
+      all-en:
+        match:
+          name: "e*"
+        dhcp4: true
+    wifis:
+      all-wifi:
+        match:
+          name: "w*"
+        dhcp4: true
+  
+  # Target matching the largest available drive for automated LUKS2 and recovery partitioning
+  storage:
+    config:
+      # 1. Target Disk (Dynamic matching)
+      - id: target-disk
+        type: disk
+        match:
+          size: largest
+        ptable: gpt
+        wipe: superblock-recursive
+        preserve: false
+        grub_device: true
+
+      # 2. EFI System Partition
+      - id: partition-efi
+        type: partition
+        device: target-disk
+        size: 512M
+        flag: boot
+      - id: format-efi
+        type: format
+        fstype: fat32
+        volume: partition-efi
+
+      # 3. Boot Partition (Unencrypted)
+      - id: partition-boot
+        type: partition
+        device: target-disk
+        size: 1G
+      - id: format-boot
+        type: format
+        fstype: ext4
+        volume: partition-boot
+
+      # 4. Recovery Partition (Contains Squashfs OS image)
+      - id: partition-recovery
+        type: partition
+        device: target-disk
+        size: 6G
+      - id: format-recovery
+        type: format
+        fstype: ext4
+        label: recovery
+        volume: partition-recovery
+
+      # 5. LUKS2 Container Partition
+      - id: partition-luks
+        type: partition
+        device: target-disk
+        size: -1 # Use remaining space
+      - id: dm-crypt-luks
+        type: dm_crypt
+        volume: partition-luks
+        key: "TemporaryDefaultPassword123!" # Default sterile password, will be reinforced via TPM
+
+      # 6. LVM Volume Group
+      - id: lvm-vg
+        type: lvm_volgroup
+        devices: [dm-crypt-luks]
+
+      # 7. Swap Logical Volume (Encrypted swap)
+      - id: lvm-swap
+        type: lvm_partition
+        name: swap
+        volgroup: lvm-vg
+        size: 8G
+      - id: format-swap
+        type: format
+        fstype: swap
+        volume: lvm-swap
+
+      # 8. Root Logical Volume
+      - id: lvm-root
+        type: lvm_partition
+        name: root
+        volgroup: lvm-vg
+        size: -1
+      - id: format-root
+        type: format
+        fstype: btrfs
+        volume: lvm-root
+
+      # 9. Mount Points
+      - type: mount
+        device: format-efi
+        path: /boot/efi
+      - type: mount
+        device: format-boot
+        path: /boot
+      - type: mount
+        device: format-root
+        path: /
+      - type: mount
+        device: format-swap
+        path: none
+      - type: mount
+        device: format-recovery
+        path: /recovery
+        options: ro
+
+  # Package selections
+  packages:
+    - lxqt-core
+    - pcmanfm-qt
+    - trojita
+    - kgpg
+    - sddm
+    - xorg
+    - ripgrep
+    - fd-find
+    - bat
+    - eza
+    - ufw
+    - auditd
+    - squashfs-tools
+    - rclone
+    - python3-yaml
+    - jq
+    - curl
+    - snapper
+    - apparmor
+    - apparmor-utils
+    - network-manager
+    - lm-sensors
+    - i8kutils
+    - network-manager-gnome
+    - libtss2-tcti-device-dev
+    - tpm2-tools
+    - wget
+    - software-properties-common
+
+  # Post-installation execution block
+  late-commands:
+    # ====== SECTION 1: Secrets Ingestion from CIDATA USB ======
+    - |
+      echo "=== Polling for CIDATA drive ==="
+      CIDATA_DEV=""
+      for i in {1..15}; do
+        CIDATA_DEV=$(blkid -L CIDATA || blkid -L cidata || true)
+        [ -n "$CIDATA_DEV" ] && break
+        sleep 1
+      done
+      
+      if [ -n "$CIDATA_DEV" ]; then
+        echo "Found CIDATA drive at $CIDATA_DEV"
+        mkdir -p /tmp/cidata
+        mount -o ro "$CIDATA_DEV" /tmp/cidata
+        
+        # Copy the ingestion script from cdrom to installer env and run it
+        cp /cdrom/cidata_ingest.py /tmp/cidata_ingest.py
+        chmod +x /tmp/cidata_ingest.py
+        /tmp/cidata_ingest.py
+        
+        umount /tmp/cidata
+      else
+        echo "WARNING: CIDATA secrets volume not found. Installation is sterile."
+      fi
+
+    # ====== SECTION 2: BTRFS Subvolumes & Snapper ======
+    # NOTE: This MUST run before any chroot operations so that all subsequent
+    # sections write into the @ subvolume, not the flat BTRFS root.
+    - |
+      echo "=== Setting up BTRFS subvolumes and Snapper ==="
+      ROOT_DEV=$(awk '$2 == "/target" { print $1 }' /proc/mounts)
+
+      umount /target/boot/efi || true
+      umount /target/boot || true
+      umount /target || true
+
+      mkdir -p /mnt/btrfs_root
+      mount "$ROOT_DEV" /mnt/btrfs_root
+
+      btrfs subvolume create /mnt/btrfs_root/@
+      btrfs subvolume create /mnt/btrfs_root/@home
+
+      # Move files from flat root to @ subvolume
+      find /mnt/btrfs_root -maxdepth 1 -not -name "." -not -name ".." -not -name "@" -not -name "@home" -exec mv {} /mnt/btrfs_root/@/ \;
+
+      # Remount with subvolumes
+      umount /mnt/btrfs_root
+      mount -o subvol=@ "$ROOT_DEV" /target
+      mount /target/boot || true
+      mount /target/boot/efi || true
+
+      mkdir -p /target/home
+      mount -o subvol=@home "$ROOT_DEV" /target/home
+
+      # Update fstab to mount the subvolumes
+      sed -i -E 's|(/ btrfs [^[:space:]]+)|\1,subvol=@|' /target/etc/fstab
+      ROOT_UUID=$(grep " / btrfs" /target/etc/fstab | awk '{print $1}')
+      echo "$ROOT_UUID /home btrfs defaults,subvol=@home 0 0" >> /target/etc/fstab
+
+      # Initialize Snapper config
+      chroot /target snapper --no-dbus -c root create-config /
+
+    # ====== SECTION 3: LUKS2 TPM 2.0 Binding ======
+    - |
+      echo "=== Enrolling TPM 2.0 Key ==="
+      LUKS_DEV=$(blkid -t TYPE=crypto_LUKS -o device | head -n1)
+      if [ -n "$LUKS_DEV" ]; then
+        echo -n "TemporaryDefaultPassword123!" > /tmp/luks-pass
+        
+        # Enroll TPM 2.0 key (PCRs 0 + 4 + 7 bind to BIOS, Boot Loader, and Secure Boot state)
+        systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+4+7 --unlock-key-file=/tmp/luks-pass "$LUKS_DEV"
+        rm -f /tmp/luks-pass
+        
+        # Update target crypttab with tpm2-device=auto
+        sed -i 's/\(luks\)/\1,tpm2-device=auto/' /target/etc/crypttab
+        echo "TPM 2.0 enrolled and crypttab updated."
+      else
+        echo "ERROR: LUKS device not found. TPM binding failed."
+      fi
+
+    # ====== SECTION 4: System Hardening & Routing ======
+    # 3a. Auditd Rules
+    - |
+      cat << 'EOF' >> /target/etc/audit/rules.d/audit.rules
+      -w /opt/ -p x -k opt_exec
+      -w /usr/local/bin/ -p x -k usr_local_bin_exec
+      EOF
+      
+    # 3b. UFW Configuration
+    - |
+      sed -i 's/ENABLED=no/ENABLED=yes/' /target/etc/ufw/ufw.conf
+      sed -i 's/DEFAULT_INPUT_POLICY="ACCEPT"/DEFAULT_INPUT_POLICY="DROP"/' /target/etc/default/ufw
+
+    # ====== SECTION 5: VPN and Rclone Config Injection ======
+    # 4a. Copy Rclone timer files and enable
+    - |
+      cp /cdrom/rclone-backup.service /target/etc/systemd/system/rclone-backup.service
+      cp /cdrom/rclone-backup.timer /target/etc/systemd/system/rclone-backup.timer
+      chroot /target systemctl enable rclone-backup.timer
+
+    # 4b. Install ProtonVPN PPA & CLI
+    - |
+      chroot /target wget -q https://repo.protonvpn.com/debian/dists/stable/main/binary-all/protonvpn-stable-release_1.0.4-1_all.deb -O /tmp/protonvpn.deb
+      chroot /target dpkg -i /tmp/protonvpn.deb
+      chroot /target rm -f /tmp/protonvpn.deb
+      chroot /target apt-get update
+      # Install non-interactively
+      DEBIAN_FRONTEND=noninteractive chroot /target apt-get install -y protonvpn-cli
+
+    # 4c. Inject VPN Autostart script and systemd service
+    - |
+      cp /cdrom/vpn-auto.sh /target/usr/local/bin/vpn-auto.sh
+      chmod +x /target/usr/local/bin/vpn-auto.sh
+      
+      cat << 'EOF' > /target/etc/systemd/system/protonvpn-autostart.service
+      [Unit]
+      Description=Automated ProtonVPN Autostart Connection
+      After=network-online.target NetworkManager.service
+      Wants=network-online.target NetworkManager.service
+      
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      Environment=HOME=/home/shane USER=shane PVPN_CONFIG_DIR=/home/shane/.config/protonvpn
+      ExecStart=/usr/local/bin/vpn-auto.sh --kill-switch=hard
+      
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+      
+      chroot /target systemctl enable protonvpn-autostart.service
+
+    # 4d. Install Proton Pass CLI
+    - |
+      echo "=== Installing Proton Pass CLI ==="
+      chroot /target bash -c 'curl -fsSL https://proton.me/download/pass-cli/install.sh | PROTON_PASS_CLI_INSTALL_DIR=/usr/local/bin bash'
+
+    # ====== SECTION 6: Desktop Customization ======
+    # 5a. Firefox PPA Setup and Installation (Bypassing Snap)
+    - |
+      cat << 'EOF' > /target/etc/apt/preferences.d/mozilla-firefox
+      Package: firefox*
+      Pin: release o=LP-PPA-mozillateam
+      Pin-Priority: 1001
+      
+      Package: firefox*
+      Pin: release o=Ubuntu
+      Pin-Priority: -1
+      EOF
+      
+      chroot /target add-apt-repository -y ppa:mozillateam/ppa
+      chroot /target apt-get update
+      DEBIAN_FRONTEND=noninteractive chroot /target apt-get install -y firefox
+      
+    # 5b. AppArmor Firefox Overrides
+    - |
+      mkdir -p /target/etc/apparmor.d/local
+      cat << 'EOF' > /target/etc/apparmor.d/local/usr.bin.firefox
+      # Explicitly deny access to sensitive secrets
+      deny owner @{HOME}/.config/rclone/** mrwkl,
+      deny owner @{HOME}/claude.json mrwkl,
+      EOF
+      
+    # 5c. Firefox Arkenfox profile setup integration
+    - |
+      mkdir -p /target/etc/firefox
+      cp /cdrom/firefox-user.js /target/etc/firefox/user.js
+      cp /cdrom/firefox-profile-setup.sh /target/etc/profile.d/firefox-profile-setup.sh
+      chmod +x /target/etc/profile.d/firefox-profile-setup.sh
+
+    # 5d. Desktop App Generic Naming (Using overrides in /usr/local/share/applications to survive upgrades)
+    - |
+      mkdir -p /target/usr/local/share/applications
+      
+      for app in trojita pcmanfm-qt qterminal firefox; do
+        if [ -f "/target/usr/share/applications/$app.desktop" ]; then
+          cp "/target/usr/share/applications/$app.desktop" "/target/usr/local/share/applications/"
+        fi
+      done
+      
+      # Run desktop renaming script in target context
+      cp /cdrom/desktop_rename.py /tmp/desktop_rename.py
+      chmod +x /tmp/desktop_rename.py
+      /tmp/desktop_rename.py
+      
+      chroot /target update-desktop-database /usr/local/share/applications || true
+
+    # ====== SECTION 7: Recovery Partition Setup ======
+    - |
+      echo "=== Setting up Recovery Partition ==="
+      # 1. Mount recovery partition (wait for udev to populate labels)
+      udevadm settle
+      mkdir -p /mnt/recovery
+      for i in {1..15}; do
+        if mount /dev/disk/by-label/recovery /mnt/recovery 2>/dev/null; then break; fi
+        sleep 1
+      done
+      
+      # 2. Inject modules into initramfs config
+      echo "overlay" >> /target/etc/initramfs-tools/modules
+      echo "loop" >> /target/etc/initramfs-tools/modules
+      
+      # 3. Create custom initramfs script to support squashfs overlay boot
+      cat << 'EOF' > /target/etc/initramfs-tools/scripts/local-bottom/recovery
+      #!/bin/sh
+      PREREQ=""
+      prereqs() {
+          echo "$PREREQ"
+      }
+      case $1 in
+      prereqs)
+          prereqs
+          exit 0
+          ;;
+      esac
+      
+      . /scripts/functions
+      
+      recovery_mode=false
+      for arg in $(cat /proc/cmdline); do
+          if [ "$arg" = "recoveryboot" ]; then
+              recovery_mode=true
+          fi
+      done
+      
+      if [ "$recovery_mode" = "false" ]; then
+          exit 0
+      fi
+      
+      log_begin_msg "Recovery mode: mounting Squashfs overlay root"
+      modprobe overlay
+      modprobe loop
+      
+      mkdir -p /run/recovery-mnt
+      mount -o move ${rootmnt} /run/recovery-mnt
+      
+      mkdir -p /run/squashfs-mnt
+      if ! mount -o loop,ro /run/recovery-mnt/root.squashfs /run/squashfs-mnt; then
+          log_failure_msg "Failed to loop mount root.squashfs"
+          mount -o move /run/recovery-mnt ${rootmnt}
+          exit 1
+      fi
+      
+      mkdir -p /run/cow-mnt
+      mount -t tmpfs -o mode=755 tmpfs /run/cow-mnt
+      mkdir -p /run/cow-mnt/upper /run/cow-mnt/work
+      
+      if ! mount -t overlay overlay -o lowerdir=/run/squashfs-mnt,upperdir=/run/cow-mnt/upper,workdir=/run/cow-mnt/work ${rootmnt}; then
+          log_failure_msg "Failed to mount overlayfs"
+          umount /run/squashfs-mnt
+          umount /run/cow-mnt
+          mount -o move /run/recovery-mnt ${rootmnt}
+          exit 1
+      fi
+      
+      mkdir -p ${rootmnt}/run/recovery-mnt
+      mkdir -p ${rootmnt}/run/squashfs-mnt
+      mkdir -p ${rootmnt}/run/cow-mnt
+      
+      mount -o move /run/recovery-mnt ${rootmnt}/run/recovery-mnt
+      mount -o move /run/squashfs-mnt ${rootmnt}/run/squashfs-mnt
+      mount -o move /run/cow-mnt ${rootmnt}/run/cow-mnt
+      
+      log_end_msg
+      exit 0
+      EOF
+      
+      chmod +x /target/etc/initramfs-tools/scripts/local-bottom/recovery
+      
+      # 4. Rebuild target initramfs with recovery modules & interceptor
+      chroot /target update-initramfs -u -k all
+      
+      # 5. Copy target boot components to recovery boot partition
+      mkdir -p /mnt/recovery/boot
+      cp /target/boot/vmlinuz /mnt/recovery/boot/vmlinuz
+      cp /target/boot/initrd.img /mnt/recovery/boot/initrd.img
+      
+      # 6. Generate squashfs from the installed root OS state
+      echo "Creating recovery Squashfs..."
+      mksquashfs /target /mnt/recovery/root.squashfs -comp xz -no-exports -no-sparse \
+          -e boot/* dev/* proc/* sys/* run/* mnt/* media/* tmp/* recovery/* target/*
+          
+      umount /mnt/recovery
+      
+      # 7. Add GRUB password protection and custom recovery entry
+      cat << 'EOF' >> /target/etc/grub.d/40_custom
+      
+      # GRUB Password Protection (sterile default password: TemporaryDefaultPassword123!)
+      set superusers="admin"
+      password_pbkdf2 admin grub.pbkdf2.sha512.10000.8A5B71496198BAD376D4211B59ECD229397E7C82D17E0D9559AC22C322D484467EC67BF7313BD89ADEF562B313B3C94C605688B7FA2F14F5650DB899E2D10683.F08AA5CF003D619AC08D227F456C6CDA9B9518839725A944FDCB04B8C63179D51E89D17A3CD9CC33B64A7AA6F67740D39F3800EE9DB5102AE77FBB73A19C9C89
+
+      menuentry "Ubuntu 26.04 Recovery Mode (Read-Only Squashfs)" --class ubuntu {
+          insmod part_gpt
+          insmod ext2
+          search --no-floppy --label --set=root recovery
+          linux /boot/vmlinuz root=LABEL=recovery ro recoveryboot
+          initrd /boot/initrd.img
+      }
+      EOF
+      
+      # 8. Patch 10_linux to make standard boot entries --unrestricted, keeping recovery entries locked
+      sed -i '/if \[ x\$type != xsimple \] ; then/i \  local unrestricted_flag=""\n  if [ x$type != xrecovery ] ; then unrestricted_flag="--unrestricted"; fi' /target/etc/grub.d/10_linux
+      sed -i 's/\${CLASS} \\\$menuentry_id_option/\${CLASS} \${unrestricted_flag} \\\$menuentry_id_option/g' /target/etc/grub.d/10_linux
+      
+      chroot /target update-grub
+
+    # ====== SECTION 7: Dell Fan Control & CoolerControl GUI ======
+    - |
+      echo "=== Installing Fan Profile Editor (CoolerControl) ==="
+      
+      # 1. Force Dell SMM Hardware Monitor module to bypass restrictive BIOS controls
+      echo "options dell-smm-hwmon restricted=0 force=1" > /target/etc/modprobe.d/dell-smm-hwmon.conf
+      echo "dell-smm-hwmon" >> /target/etc/modules
+      
+      # 2. Run lm-sensors detection (non-interactive) to build initial sensor mappings
+      chroot /target sensors-detect --auto || true
+      
+      # 3. Add CoolerControl repository and install the background daemon
+      chroot /target bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/coolercontrol/coolercontrol/setup.deb.sh' | bash"
+      chroot /target apt-get update
+      DEBIAN_FRONTEND=noninteractive chroot /target apt-get install -y coolercontrold
+      chroot /target systemctl enable coolercontrold
+      
+      # 4. Download the CoolerControl GUI Desktop Application (AppImage)
+      chroot /target wget -qO /usr/local/bin/CoolerControl.AppImage "https://gitlab.com/coolercontrol/coolercontrol/-/releases/permalink/latest/downloads/CoolerControl-x86_64.AppImage"
+      chroot /target chmod +x /usr/local/bin/CoolerControl.AppImage
+      
+      # 5. Create application launcher for the GUI (using heredoc with tab stripping)
+      cat > /target/usr/local/share/applications/coolercontrol.desktop << 'EOF'
+[Desktop Entry]
+Name=Fan Profile Editor
+Comment=CoolerControl GUI
+Exec=/usr/local/bin/CoolerControl.AppImage --no-sandbox
+Icon=utilities-system-monitor
+Type=Application
+Categories=System;Settings;HardwareSettings;
+Terminal=false
+EOF
+      
+      # 6. Ensure the user is in the correct groups to access sensors
+      chroot /target usermod -aG i2c shane || true
+
+    # ====== SECTION 8: Self-Hosted MDM Remote Wipe Agent ======
+    - |
+      echo "=== Installing Self-Hosted MDM Agent ==="
+
+      # 1. Deploy sanitize script
+      cp /cdrom/sanitize.sh /target/usr/local/sbin/sanitize.sh
+      chmod 700 /target/usr/local/sbin/sanitize.sh
+      chown root:root /target/usr/local/sbin/sanitize.sh
+
+      # 2. Deploy check-in agent
+      cp /cdrom/checkin.sh /target/usr/local/sbin/checkin.sh
+      chmod 700 /target/usr/local/sbin/checkin.sh
+      chown root:root /target/usr/local/sbin/checkin.sh
+
+      # 3. Deploy and enable systemd service
+      cp /cdrom/checkin.service /target/etc/systemd/system/checkin.service
+      chroot /target systemctl enable checkin.service
+
+      # 4. Deploy AppArmor profile
+      cp /cdrom/apparmor-checkin /target/etc/apparmor.d/usr.local.sbin.checkin.sh
+      chroot /target apparmor_parser -r /etc/apparmor.d/usr.local.sbin.checkin.sh || true
+
+      # 5. Create MDM config directory (operator places server.pem here post-install)
+      mkdir -p /target/etc/mdm
+      chmod 755 /target/etc/mdm
+
+      # 6. Deploy initramfs hooks
+      cp /cdrom/initramfs/hooks/wifi-dropbear /target/etc/initramfs-tools/hooks/wifi-dropbear
+      chmod 755 /target/etc/initramfs-tools/hooks/wifi-dropbear
+
+      mkdir -p /target/etc/initramfs-tools/scripts/init-premount
+      cp /cdrom/initramfs/scripts/init-premount/wifi-connect /target/etc/initramfs-tools/scripts/init-premount/wifi-connect
+      chmod 755 /target/etc/initramfs-tools/scripts/init-premount/wifi-connect
+
+      # 7. Deploy emergency hotkey wrapper and sudoers
+      cp /cdrom/emergency-hotkey.sh /target/usr/local/bin/emergency-hotkey.sh
+      chmod 755 /target/usr/local/bin/emergency-hotkey.sh
+      chown root:root /target/usr/local/bin/emergency-hotkey.sh
+      echo "shane ALL=(root) NOPASSWD: /usr/local/sbin/sanitize.sh" > /target/etc/sudoers.d/emergency-hotkey
+      chmod 440 /target/etc/sudoers.d/emergency-hotkey
+
+      # 8. Deploy LXQt keyboard shortcut config
+      mkdir -p /target/home/shane/.config/lxqt
+      cat > /target/home/shane/.config/lxqt/globalkeyshortcuts.conf << 'SHORTCUT'
+[Meta+Shift+Delete]
+Comment=Emergency Sanitize
+Exec=/usr/local/bin/emergency-hotkey.sh
+SHORTCUT
+      chroot /target chown -R 1000:1000 /home/shane/.config/lxqt
+
+      # 9. Deploy Post-Install Keys (Zero-touch automation from Wizard)
+      cp /cdrom/server.pem /target/etc/mdm/server.pem
+      chmod 644 /target/etc/mdm/server.pem
+      
+      mkdir -p /target/etc/dropbear/initramfs
+      cp /cdrom/authorized_keys /target/etc/dropbear/initramfs/authorized_keys
+      chmod 600 /target/etc/dropbear/initramfs/authorized_keys
+      
+      mkdir -p /target/etc/wpa_supplicant
+      cp /cdrom/initramfs.conf /target/etc/wpa_supplicant/initramfs.conf
+      chmod 600 /target/etc/wpa_supplicant/initramfs.conf
+
+      # 10. Immutable bit on sanitize script (prevent accidental modification)
+      chroot /target chattr +i /usr/local/sbin/sanitize.sh
+
+    # ====== SECTION 9: Recovery Partition Setup ======
+    # This must be the absolute final step so the squashfs captures the MDM agent and Fan Control.
+    - |
+      echo "=== Setting up Recovery Partition ==="
+      # 1. Mount recovery partition (wait for udev to populate labels)
+      udevadm settle
+      mkdir -p /mnt/recovery
+      for i in {1..15}; do
+        if mount /dev/disk/by-label/recovery /mnt/recovery 2>/dev/null; then break; fi
+        sleep 1
+      done
+      
+      # 2. Inject modules into initramfs config
+      echo "overlay" >> /target/etc/initramfs-tools/modules
+      echo "loop" >> /target/etc/initramfs-tools/modules
+      
+      # 3. Create custom initramfs script to support squashfs overlay boot
+      cat << 'EOF' > /target/etc/initramfs-tools/scripts/local-bottom/recovery
+      #!/bin/sh
+      PREREQ=""
+      prereqs() {
+          echo "$PREREQ"
+      }
+      case $1 in
+      prereqs)
+          prereqs
+          exit 0
+          ;;
+      esac
+      
+      . /scripts/functions
+      
+      recovery_mode=false
+      for arg in $(cat /proc/cmdline); do
+          if [ "$arg" = "recoveryboot" ]; then
+              recovery_mode=true
+          fi
+      done
+      
+      if [ "$recovery_mode" = "false" ]; then
+          exit 0
+      fi
+      
+      log_begin_msg "Recovery mode: mounting Squashfs overlay root"
+      modprobe overlay
+      modprobe loop
+      
+      mkdir -p /run/recovery-mnt
+      mount -o move ${rootmnt} /run/recovery-mnt
+      
+      mkdir -p /run/squashfs-mnt
+      if ! mount -o loop,ro /run/recovery-mnt/root.squashfs /run/squashfs-mnt; then
+          log_failure_msg "Failed to loop mount root.squashfs"
+          mount -o move /run/recovery-mnt ${rootmnt}
+          exit 1
+      fi
+      
+      mkdir -p /run/cow-mnt
+      mount -t tmpfs -o mode=755 tmpfs /run/cow-mnt
+      mkdir -p /run/cow-mnt/upper /run/cow-mnt/work
+      
+      if ! mount -t overlay overlay -o lowerdir=/run/squashfs-mnt,upperdir=/run/cow-mnt/upper,workdir=/run/cow-mnt/work ${rootmnt}; then
+          log_failure_msg "Failed to mount overlayfs"
+          umount /run/squashfs-mnt
+          umount /run/cow-mnt
+          mount -o move /run/recovery-mnt ${rootmnt}
+          exit 1
+      fi
+      
+      mkdir -p ${rootmnt}/run/recovery-mnt
+      mkdir -p ${rootmnt}/run/squashfs-mnt
+      mkdir -p ${rootmnt}/run/cow-mnt
+      
+      mount -o move /run/recovery-mnt ${rootmnt}/run/recovery-mnt
+      mount -o move /run/squashfs-mnt ${rootmnt}/run/squashfs-mnt
+      mount -o move /run/cow-mnt ${rootmnt}/run/cow-mnt
+      
+      log_end_msg
+      exit 0
+      EOF
+      
+      chmod +x /target/etc/initramfs-tools/scripts/local-bottom/recovery
+      
+      # 4. Rebuild target initramfs with recovery modules & interceptor
+      chroot /target update-initramfs -u -k all
+      
+      # 5. Copy target boot components to recovery boot partition
+      mkdir -p /mnt/recovery/boot
+      cp /target/boot/vmlinuz /mnt/recovery/boot/vmlinuz
+      cp /target/boot/initrd.img /mnt/recovery/boot/initrd.img
+      
+      # 6. Generate squashfs from the installed root OS state
+      echo "Creating recovery Squashfs..."
+      
+      # CRITICAL BUGFIX: Temporarily comment out / and /home in fstab so the recovery
+      # OS systemd doesn't try to shadow-mount the overlay root with the LUKS partition
+      sed -i -E 's|^([^#].* / btrfs .*)$|# \1|' /target/etc/fstab
+      sed -i -E 's|^([^#].* /home btrfs .*)$|# \1|' /target/etc/fstab
+      
+      mksquashfs /target /mnt/recovery/root.squashfs -comp xz -no-exports -no-sparse \
+          -e boot/* dev/* proc/* sys/* run/* mnt/* media/* tmp/* recovery/* target/*
+          
+      # Restore fstab
+      sed -i -E 's|^# ([^#].* / btrfs .*)$|\1|' /target/etc/fstab
+      sed -i -E 's|^# ([^#].* /home btrfs .*)$|\1|' /target/etc/fstab
+      
+      umount /mnt/recovery
+      
+      # 7. Add GRUB password protection and custom recovery entry
+      cat << 'EOF' >> /target/etc/grub.d/40_custom
+      
+      # GRUB Password Protection (sterile default password: TemporaryDefaultPassword123!)
+      set superusers="admin"
+      password_pbkdf2 admin grub.pbkdf2.sha512.10000.8A5B71496198BAD376D4211B59ECD229397E7C82D17E0D9559AC22C322D484467EC67BF7313BD89ADEF562B313B3C94C605688B7FA2F14F5650DB899E2D10683.F08AA5CF003D619AC08D227F456C6CDA9B9518839725A944FDCB04B8C63179D51E89D17A3CD9CC33B64A7AA6F67740D39F3800EE9DB5102AE77FBB73A19C9C89
+      
+      menuentry "Ubuntu 26.04 Recovery Mode (Read-Only Squashfs)" --class ubuntu {
+          insmod part_gpt
+          insmod ext2
+          search --no-floppy --label --set=root recovery
+          linux /boot/vmlinuz root=LABEL=recovery ro recoveryboot
+          initrd /boot/initrd.img
+      }
+      EOF
+      
+      # 8. Patch 10_linux to make standard boot entries --unrestricted, keeping recovery entries locked
+      sed -i '/if \[ x\$type != xsimple \] ; then/i \  local unrestricted_flag=""\n  if [ x$type != xrecovery ] ; then unrestricted_flag="--unrestricted"; fi' /target/etc/grub.d/10_linux
+      sed -i 's/\${CLASS} \\\$menuentry_id_option/\${CLASS} \${unrestricted_flag} \\\$menuentry_id_option/g' /target/etc/grub.d/10_linux
+      
+      chroot /target update-grub
