@@ -74,12 +74,15 @@ read -p "Enter your home WiFi SSID: " WIFI_SSID
 read -rs -p "Enter your home WiFi Password: " WIFI_PASS
 echo
 
+SAFE_WIFI_SSID=$(printf '%s\n' "$WIFI_SSID" | sed 's/[\\"]/\\&/g')
+SAFE_WIFI_PASS=$(printf '%s\n' "$WIFI_PASS" | sed 's/[\\"]/\\&/g')
+
 cat << EOF > "$WORKSPACE/initramfs.conf"
 ctrl_interface=/run/wpa_supplicant
 update_config=0
 network={
-    ssid="$WIFI_SSID"
-    psk="$WIFI_PASS"
+    ssid="$SAFE_WIFI_SSID"
+    psk="$SAFE_WIFI_PASS"
     key_mgmt=WPA-PSK
 }
 EOF
