@@ -18,7 +18,7 @@ set -euo pipefail
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-LUKS_PARTITION="/dev/nvme0n1p2"
+LUKS_PARTITION=$(blkid -t TYPE=crypto_LUKS -o device | head -n1)
 HEADER_OVERWRITE_BYTES=33554432  # 32 MiB — covers LUKS2 header + metadata areas
 LOG_TAG="mdm-sanitize"
 

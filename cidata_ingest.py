@@ -8,10 +8,13 @@ import yaml
 import os
 import sys
 import subprocess
-import termios
+import getpass
 
 def prompt_passphrase():
-    # Attempt to open active TTY (usually /dev/tty1 during Subiquity install)
+    tty_out = sys.stdout
+    tty_in = sys.stdin
+
+    # Attempt to use active TTY if available
     tty_path = '/dev/tty1'
     if not os.path.exists(tty_path):
         tty_path = '/dev/console'
@@ -22,29 +25,19 @@ def prompt_passphrase():
         tty_out = os.fdopen(tty_fd, 'w')
     except Exception as e:
         print(f"Warning: could not open {tty_path}, falling back to stdin/stdout: {e}")
-        tty_in = sys.stdin
-        tty_out = sys.stdout
 
     tty_out.write("\n============================================\n")
     tty_out.write("   ENTER CIDATA SECRETS DECRYPTION KEY\n")
     tty_out.write("============================================\n")
-    tty_out.write("Enter passphrase: ")
     tty_out.flush()
     
-    # Read password securely (turn off echo)
-    fd = tty_in.fileno()
     try:
-        old_settings = termios.tcgetattr(fd)
-        new_settings = termios.tcgetattr(fd)
-        new_settings[3] = new_settings[3] & ~termios.ECHO
-        termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-        passphrase = tty_in.readline().strip()
+        passphrase = getpass.getpass(prompt="Enter passphrase: ", stream=tty_out)
     except Exception as e:
-        # If termios fails (e.g. not a tty), read raw input
+        # Fallback if getpass fails (e.g. not a terminal at all)
+        tty_out.write("Enter passphrase: ")
+        tty_out.flush()
         passphrase = tty_in.readline().strip()
-    else:
-        # Restore terminal settings
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         
     tty_out.write("\nPassphrase received. Decrypting...\n")
     tty_out.flush()

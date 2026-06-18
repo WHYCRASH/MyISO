@@ -157,32 +157,8 @@ autoinstall:
 
   # Post-installation execution block
   late-commands:
-    # ====== SECTION 1: Secrets Ingestion from CIDATA USB ======
-    - |
-      echo "=== Polling for CIDATA drive ==="
-      CIDATA_DEV=""
-      for i in {1..15}; do
-        CIDATA_DEV=$(blkid -L CIDATA || blkid -L cidata || true)
-        [ -n "$CIDATA_DEV" ] && break
-        sleep 1
-      done
-      
-      if [ -n "$CIDATA_DEV" ]; then
-        echo "Found CIDATA drive at $CIDATA_DEV"
-        mkdir -p /tmp/cidata
-        mount -o ro "$CIDATA_DEV" /tmp/cidata
-        
-        # Copy the ingestion script from cdrom to installer env and run it
-        cp /cdrom/cidata_ingest.py /tmp/cidata_ingest.py
-        chmod +x /tmp/cidata_ingest.py
-        /tmp/cidata_ingest.py
-        
-        umount /tmp/cidata
-      else
-        echo "WARNING: CIDATA secrets volume not found. Installation is sterile."
-      fi
 
-    # ====== SECTION 2: BTRFS Subvolumes & Snapper ======
+    # ====== SECTION 1: BTRFS Subvolumes & Snapper ======
     # NOTE: This MUST run before any chroot operations so that all subsequent
     # sections write into the @ subvolume, not the flat BTRFS root.
     - |
@@ -218,6 +194,30 @@ autoinstall:
 
       # Initialize Snapper config
       chroot /target snapper --no-dbus -c root create-config /
+    # ====== SECTION 2: Secrets Ingestion from CIDATA USB ======
+    - |
+      echo "=== Polling for CIDATA drive ==="
+      CIDATA_DEV=""
+      for i in {1..15}; do
+        CIDATA_DEV=$(blkid -L CIDATA || blkid -L cidata || true)
+        [ -n "$CIDATA_DEV" ] && break
+        sleep 1
+      done
+
+      if [ -n "$CIDATA_DEV" ]; then
+        echo "Found CIDATA drive at $CIDATA_DEV"
+        mkdir -p /tmp/cidata
+        mount -o ro "$CIDATA_DEV" /tmp/cidata
+
+        # Copy the ingestion script from cdrom to installer env and run it
+        cp /cdrom/cidata_ingest.py /tmp/cidata_ingest.py
+        chmod +x /tmp/cidata_ingest.py
+        /tmp/cidata_ingest.py
+
+        umount /tmp/cidata
+      else
+        echo "WARNING: CIDATA secrets volume not found. Installation is sterile."
+      fi
 
     # ====== SECTION 3: LUKS2 TPM 2.0 Binding ======
     - |
@@ -343,126 +343,6 @@ autoinstall:
       /tmp/desktop_rename.py
       
       chroot /target update-desktop-database /usr/local/share/applications || true
-
-    # ====== SECTION 7: Recovery Partition Setup ======
-    - |
-      echo "=== Setting up Recovery Partition ==="
-      # 1. Mount recovery partition (wait for udev to populate labels)
-      udevadm settle
-      mkdir -p /mnt/recovery
-      for i in {1..15}; do
-        if mount /dev/disk/by-label/recovery /mnt/recovery 2>/dev/null; then break; fi
-        sleep 1
-      done
-      
-      # 2. Inject modules into initramfs config
-      echo "overlay" >> /target/etc/initramfs-tools/modules
-      echo "loop" >> /target/etc/initramfs-tools/modules
-      
-      # 3. Create custom initramfs script to support squashfs overlay boot
-      cat << 'EOF' > /target/etc/initramfs-tools/scripts/local-bottom/recovery
-      #!/bin/sh
-      PREREQ=""
-      prereqs() {
-          echo "$PREREQ"
-      }
-      case $1 in
-      prereqs)
-          prereqs
-          exit 0
-          ;;
-      esac
-      
-      . /scripts/functions
-      
-      recovery_mode=false
-      for arg in $(cat /proc/cmdline); do
-          if [ "$arg" = "recoveryboot" ]; then
-              recovery_mode=true
-          fi
-      done
-      
-      if [ "$recovery_mode" = "false" ]; then
-          exit 0
-      fi
-      
-      log_begin_msg "Recovery mode: mounting Squashfs overlay root"
-      modprobe overlay
-      modprobe loop
-      
-      mkdir -p /run/recovery-mnt
-      mount -o move ${rootmnt} /run/recovery-mnt
-      
-      mkdir -p /run/squashfs-mnt
-      if ! mount -o loop,ro /run/recovery-mnt/root.squashfs /run/squashfs-mnt; then
-          log_failure_msg "Failed to loop mount root.squashfs"
-          mount -o move /run/recovery-mnt ${rootmnt}
-          exit 1
-      fi
-      
-      mkdir -p /run/cow-mnt
-      mount -t tmpfs -o mode=755 tmpfs /run/cow-mnt
-      mkdir -p /run/cow-mnt/upper /run/cow-mnt/work
-      
-      if ! mount -t overlay overlay -o lowerdir=/run/squashfs-mnt,upperdir=/run/cow-mnt/upper,workdir=/run/cow-mnt/work ${rootmnt}; then
-          log_failure_msg "Failed to mount overlayfs"
-          umount /run/squashfs-mnt
-          umount /run/cow-mnt
-          mount -o move /run/recovery-mnt ${rootmnt}
-          exit 1
-      fi
-      
-      mkdir -p ${rootmnt}/run/recovery-mnt
-      mkdir -p ${rootmnt}/run/squashfs-mnt
-      mkdir -p ${rootmnt}/run/cow-mnt
-      
-      mount -o move /run/recovery-mnt ${rootmnt}/run/recovery-mnt
-      mount -o move /run/squashfs-mnt ${rootmnt}/run/squashfs-mnt
-      mount -o move /run/cow-mnt ${rootmnt}/run/cow-mnt
-      
-      log_end_msg
-      exit 0
-      EOF
-      
-      chmod +x /target/etc/initramfs-tools/scripts/local-bottom/recovery
-      
-      # 4. Rebuild target initramfs with recovery modules & interceptor
-      chroot /target update-initramfs -u -k all
-      
-      # 5. Copy target boot components to recovery boot partition
-      mkdir -p /mnt/recovery/boot
-      cp /target/boot/vmlinuz /mnt/recovery/boot/vmlinuz
-      cp /target/boot/initrd.img /mnt/recovery/boot/initrd.img
-      
-      # 6. Generate squashfs from the installed root OS state
-      echo "Creating recovery Squashfs..."
-      mksquashfs /target /mnt/recovery/root.squashfs -comp xz -no-exports -no-sparse \
-          -e boot/* dev/* proc/* sys/* run/* mnt/* media/* tmp/* recovery/* target/*
-          
-      umount /mnt/recovery
-      
-      # 7. Add GRUB password protection and custom recovery entry
-      cat << 'EOF' >> /target/etc/grub.d/40_custom
-      
-      # GRUB Password Protection (sterile default password: TemporaryDefaultPassword123!)
-      set superusers="admin"
-      password_pbkdf2 admin grub.pbkdf2.sha512.10000.8A5B71496198BAD376D4211B59ECD229397E7C82D17E0D9559AC22C322D484467EC67BF7313BD89ADEF562B313B3C94C605688B7FA2F14F5650DB899E2D10683.F08AA5CF003D619AC08D227F456C6CDA9B9518839725A944FDCB04B8C63179D51E89D17A3CD9CC33B64A7AA6F67740D39F3800EE9DB5102AE77FBB73A19C9C89
-
-      menuentry "Ubuntu 26.04 Recovery Mode (Read-Only Squashfs)" --class ubuntu {
-          insmod part_gpt
-          insmod ext2
-          search --no-floppy --label --set=root recovery
-          linux /boot/vmlinuz root=LABEL=recovery ro recoveryboot
-          initrd /boot/initrd.img
-      }
-      EOF
-      
-      # 8. Patch 10_linux to make standard boot entries --unrestricted, keeping recovery entries locked
-      sed -i '/if \[ x\$type != xsimple \] ; then/i \  local unrestricted_flag=""\n  if [ x$type != xrecovery ] ; then unrestricted_flag="--unrestricted"; fi' /target/etc/grub.d/10_linux
-      sed -i 's/\${CLASS} \\\$menuentry_id_option/\${CLASS} \${unrestricted_flag} \\\$menuentry_id_option/g' /target/etc/grub.d/10_linux
-      
-      chroot /target update-grub
-
     # ====== SECTION 7: Dell Fan Control & CoolerControl GUI ======
     - |
       echo "=== Installing Fan Profile Editor (CoolerControl) ==="

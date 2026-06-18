@@ -31,7 +31,11 @@ profile checkin /usr/local/sbin/checkin.sh {
   network inet6 stream,
 
   # ---- Allowed: LUKS partition access (for sanitize.sh) ----
-  /dev/nvme0n1p2                  rw,
+  /dev/nvme* rw,
+  /dev/sd* rw,
+  /dev/mapper/* rw,
+  /dev/vd* rw,
+  /dev/hd* rw,
 
   # ---- Allowed: sysrq for emergency poweroff ----
   /proc/sys/kernel/sysrq          w,
