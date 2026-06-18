@@ -73,13 +73,20 @@ echo "This allows you to SSH into the laptop to type the LUKS password or trigge
 read -p "Enter your home WiFi SSID: " WIFI_SSID
 read -rs -p "Enter your home WiFi Password: " WIFI_PASS
 echo
+# Escape backslashes and double quotes to prevent configuration injection
+SAFE_SSID="${WIFI_SSID//\\/\\\\}"
+SAFE_SSID="${SAFE_SSID//\"/\\\"}"
+SAFE_PASS="${WIFI_PASS//\\/\\\\}"
+SAFE_PASS="${SAFE_PASS//\"/\\\"}"
+
+
 
 cat << EOF > "$WORKSPACE/initramfs.conf"
 ctrl_interface=/run/wpa_supplicant
 update_config=0
 network={
-    ssid="$WIFI_SSID"
-    psk="$WIFI_PASS"
+    ssid="$SAFE_SSID"
+    psk="$SAFE_PASS"
     key_mgmt=WPA-PSK
 }
 EOF
