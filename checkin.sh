@@ -47,7 +47,6 @@ while true; do
         --max-time 15 \
         --connect-timeout 10 \
         --cacert "$PINNED_CERT" \
-        --fail-with-body \
         -H "X-Token: ${MDM_TOKEN}" \
         "$MDM_ENDPOINT" 2>/dev/null) || true
 
