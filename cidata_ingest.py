@@ -81,11 +81,25 @@ def decrypt_secrets_archive(enc_file):
         
     # Correct ownership and permissions of home directory files
     print("Correcting ownership to user shane (1000:1000)...")
-    os.system("chown -R 1000:1000 /target/home/shane/")
+    chown_cmd = ["chown", "-R", "1000:1000", "/target/home/shane/"]
+    res_chown = subprocess.run(chown_cmd, capture_output=True, text=True)
+    if res_chown.returncode != 0:
+        print(f"ERROR: Ownership correction failed! {res_chown.stderr}")
+        return False
     
     # Enforce strict 600 permissions for ingested secrets
-    os.system("find /target/home/shane/ -name 'rclone.conf' -exec chmod 600 {} +")
-    os.system("find /target/home/shane/ -name 'claude.json' -exec chmod 600 {} +")
+    print("Enforcing strict 600 permissions for ingested secrets...")
+    find_rclone = ["find", "/target/home/shane/", "-name", "rclone.conf", "-exec", "chmod", "600", "{}", "+"]
+    res_rclone = subprocess.run(find_rclone, capture_output=True, text=True)
+    if res_rclone.returncode != 0:
+        print(f"ERROR: Permission enforcement for rclone.conf failed! {res_rclone.stderr}")
+        return False
+
+    find_claude = ["find", "/target/home/shane/", "-name", "claude.json", "-exec", "chmod", "600", "{}", "+"]
+    res_claude = subprocess.run(find_claude, capture_output=True, text=True)
+    if res_claude.returncode != 0:
+        print(f"ERROR: Permission enforcement for claude.json failed! {res_claude.stderr}")
+        return False
     
     print("Secrets decryption and ingestion completed successfully.")
     return True
