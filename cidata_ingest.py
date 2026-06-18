@@ -81,11 +81,11 @@ def decrypt_secrets_archive(enc_file):
         
     # Correct ownership and permissions of home directory files
     print("Correcting ownership to user shane (1000:1000)...")
-    os.system("chown -R 1000:1000 /target/home/shane/")
+    subprocess.run(["chown", "-R", "1000:1000", "/target/home/shane/"])
     
     # Enforce strict 600 permissions for ingested secrets
-    os.system("find /target/home/shane/ -name 'rclone.conf' -exec chmod 600 {} +")
-    os.system("find /target/home/shane/ -name 'claude.json' -exec chmod 600 {} +")
+    subprocess.run(["find", "/target/home/shane/", "-name", "rclone.conf", "-exec", "chmod", "600", "{}", "+"])
+    subprocess.run(["find", "/target/home/shane/", "-name", "claude.json", "-exec", "chmod", "600", "{}", "+"])
     
     print("Secrets decryption and ingestion completed successfully.")
     return True
