@@ -109,6 +109,7 @@ def ingest_cleartext_yaml(user_data_path):
         return False
 
     print(f"Found {len(write_files)} files to ingest.")
+    chowned_dirs = set()
     for file_info in write_files:
         path = file_info.get('path')
         content = file_info.get('content')
@@ -143,7 +144,11 @@ def ingest_cleartext_yaml(user_data_path):
             os.chown(target_path, uid, gid)
             parent_dir = os.path.dirname(target_path)
             while parent_dir != '/target/home' and parent_dir != '/target' and parent_dir != '/':
+                # Check tuple to correctly handle different user ownerships across directories
+                if (parent_dir, uid, gid) in chowned_dirs:
+                    break
                 os.chown(parent_dir, uid, gid)
+                chowned_dirs.add((parent_dir, uid, gid))
                 parent_dir = os.path.dirname(parent_dir)
         except Exception as e:
             print(f"Warning: could not set ownership for {target_path}: {e}")
