@@ -6,6 +6,17 @@ set -e
 
 WORKSPACE="/home/shane/TheMasterISO"
 
+# Helper to escape variables for sed injection to prevent arbitrary execution
+escape_sed() {
+    local val="$1"
+    local delim="${2:-|}"
+    val="${val//\\/\\\\}"
+    val="${val//${delim}/\\${delim}}"
+    val="${val//&/\\&}"
+    printf "%s" "$val"
+}
+
+
 echo "========================================================"
 echo "   TheMasterISO — Guided Pre-Install Configuration"
 echo "========================================================"
@@ -30,9 +41,11 @@ echo "Generating PBKDF2 hash (this may take several seconds)..."
 GRUB_HASH=$(echo -e "$LUKS_PASS\n$LUKS_PASS" | grub-mkpasswd-pbkdf2 | awk '/grub.pbkdf2/ {print $NF}')
 
 # Patch the temporary placeholder out of autoinstall.yaml
-sed -i "s/TemporaryDefaultPassword123!/$LUKS_PASS/g" "$WORKSPACE/autoinstall.yaml"
+ESCAPED_LUKS_PASS=$(escape_sed "$LUKS_PASS" "/")
+sed -i "s/TemporaryDefaultPassword123!/$ESCAPED_LUKS_PASS/g" "$WORKSPACE/autoinstall.yaml"
 # Replace the existing long hash placeholder
-sed -i -E "s/password_pbkdf2 admin grub\.pbkdf2.*/password_pbkdf2 admin $GRUB_HASH/g" "$WORKSPACE/autoinstall.yaml"
+ESCAPED_GRUB_HASH=$(escape_sed "$GRUB_HASH" "/")
+sed -i -E "s/password_pbkdf2 admin grub\.pbkdf2.*/password_pbkdf2 admin $ESCAPED_GRUB_HASH/g" "$WORKSPACE/autoinstall.yaml"
 echo -e "✅ \e[32mPasswords and hashes securely injected into autoinstall.yaml.\e[0m"
 echo ""
 
@@ -47,18 +60,22 @@ if [ "$MDM_TYPE" = "s" ]; then
     sed -i '/IPAddressAllow=/d' "$WORKSPACE/checkin.service"
 else
     read -p "Enter the static IPv4 address of your VPS: " VPS_IP
-    sed -i "s|IPAddressAllow=.*|IPAddressAllow=$VPS_IP/32|g" "$WORKSPACE/checkin.service"
+    ESCAPED_VPS_IP=$(escape_sed "$VPS_IP" "|")
+    sed -i "s|IPAddressAllow=.*|IPAddressAllow=$ESCAPED_VPS_IP/32|g" "$WORKSPACE/checkin.service"
 fi
 
 read -p "Enter the full HTTPS endpoint URL (e.g., https://api.example.com/checkin): " MDM_URL
-sed -i "s|MDM_ENDPOINT=\".*\"|MDM_ENDPOINT=\"$MDM_URL\"|g" "$WORKSPACE/checkin.sh"
+ESCAPED_MDM_URL=$(escape_sed "$MDM_URL" "|")
+sed -i "s|MDM_ENDPOINT=\".*\"|MDM_ENDPOINT=\"$ESCAPED_MDM_URL\"|g" "$WORKSPACE/checkin.sh"
 
 read -p "Enter the secret wipe trigger phrase [Default: WIPE_CONFIRMED]: " WIPE_CMD
 WIPE_CMD=${WIPE_CMD:-WIPE_CONFIRMED}
-sed -i "s|MDM_WIPE_COMMAND=\".*\"|MDM_WIPE_COMMAND=\"$WIPE_CMD\"|g" "$WORKSPACE/checkin.sh"
+ESCAPED_WIPE_CMD=$(escape_sed "$WIPE_CMD" "|")
+sed -i "s|MDM_WIPE_COMMAND=\".*\"|MDM_WIPE_COMMAND=\"$ESCAPED_WIPE_CMD\"|g" "$WORKSPACE/checkin.sh"
 
 MDM_TOKEN=$(openssl rand -hex 32)
-sed -i "s|MDM_TOKEN=\".*\"|MDM_TOKEN=\"$MDM_TOKEN\"|g" "$WORKSPACE/checkin.sh"
+ESCAPED_MDM_TOKEN=$(escape_sed "$MDM_TOKEN" "|")
+sed -i "s|MDM_TOKEN=\".*\"|MDM_TOKEN=\"$ESCAPED_MDM_TOKEN\"|g" "$WORKSPACE/checkin.sh"
 
 echo -e "✅ \e[32mMDM Agent configured.\e[0m"
 echo -e "   \e[1;33mIMPORTANT: Your authentication token is ->\e[0m $MDM_TOKEN"
