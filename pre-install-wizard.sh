@@ -30,9 +30,11 @@ echo "Generating PBKDF2 hash (this may take several seconds)..."
 GRUB_HASH=$(echo -e "$LUKS_PASS\n$LUKS_PASS" | grub-mkpasswd-pbkdf2 | awk '/grub.pbkdf2/ {print $NF}')
 
 # Patch the temporary placeholder out of autoinstall.yaml
-sed -i "s/TemporaryDefaultPassword123!/$LUKS_PASS/g" "$WORKSPACE/autoinstall.yaml"
+export LUKS_PASS
+perl -pi -e 's/TemporaryDefaultPassword123!/$ENV{LUKS_PASS}/g' "$WORKSPACE/autoinstall.yaml"
 # Replace the existing long hash placeholder
-sed -i -E "s/password_pbkdf2 admin grub\.pbkdf2.*/password_pbkdf2 admin $GRUB_HASH/g" "$WORKSPACE/autoinstall.yaml"
+export GRUB_HASH
+perl -pi -e 's/password_pbkdf2 admin grub\.pbkdf2.*/password_pbkdf2 admin $ENV{GRUB_HASH}/g' "$WORKSPACE/autoinstall.yaml"
 echo -e "✅ \e[32mPasswords and hashes securely injected into autoinstall.yaml.\e[0m"
 echo ""
 
@@ -40,25 +42,29 @@ echo ""
 # 2. MDM Remote Wipe Configuration
 # -----------------------------------------------------------------------------
 echo -e "\e[1;34m[2/4] MDM Remote Wipe Configuration\e[0m"
-read -p "Are you hosting the endpoint on a static VPS (v) or a Serverless Function (s)? [v/s]: " MDM_TYPE
+read -r -p "Are you hosting the endpoint on a static VPS (v) or a Serverless Function (s)? [v/s]: " MDM_TYPE
 
 if [ "$MDM_TYPE" = "s" ]; then
     echo "Serverless mode selected. Removing static IP-locking from systemd service."
     sed -i '/IPAddressAllow=/d' "$WORKSPACE/checkin.service"
 else
-    read -p "Enter the static IPv4 address of your VPS: " VPS_IP
-    sed -i "s|IPAddressAllow=.*|IPAddressAllow=$VPS_IP/32|g" "$WORKSPACE/checkin.service"
+    read -r -p "Enter the static IPv4 address of your VPS: " VPS_IP
+    export VPS_IP
+    perl -pi -e 's|IPAddressAllow=.*|IPAddressAllow=$ENV{VPS_IP}/32|g' "$WORKSPACE/checkin.service"
 fi
 
-read -p "Enter the full HTTPS endpoint URL (e.g., https://api.example.com/checkin): " MDM_URL
-sed -i "s|MDM_ENDPOINT=\".*\"|MDM_ENDPOINT=\"$MDM_URL\"|g" "$WORKSPACE/checkin.sh"
+read -r -p "Enter the full HTTPS endpoint URL (e.g., https://api.example.com/checkin): " MDM_URL
+export MDM_URL
+perl -pi -e 's|MDM_ENDPOINT=".*"|MDM_ENDPOINT="$ENV{MDM_URL}"|g' "$WORKSPACE/checkin.sh"
 
-read -p "Enter the secret wipe trigger phrase [Default: WIPE_CONFIRMED]: " WIPE_CMD
+read -r -p "Enter the secret wipe trigger phrase [Default: WIPE_CONFIRMED]: " WIPE_CMD
 WIPE_CMD=${WIPE_CMD:-WIPE_CONFIRMED}
-sed -i "s|MDM_WIPE_COMMAND=\".*\"|MDM_WIPE_COMMAND=\"$WIPE_CMD\"|g" "$WORKSPACE/checkin.sh"
+export WIPE_CMD
+perl -pi -e 's|MDM_WIPE_COMMAND=".*"|MDM_WIPE_COMMAND="$ENV{WIPE_CMD}"|g' "$WORKSPACE/checkin.sh"
 
 MDM_TOKEN=$(openssl rand -hex 32)
-sed -i "s|MDM_TOKEN=\".*\"|MDM_TOKEN=\"$MDM_TOKEN\"|g" "$WORKSPACE/checkin.sh"
+export MDM_TOKEN
+perl -pi -e 's|MDM_TOKEN=".*"|MDM_TOKEN="$ENV{MDM_TOKEN}"|g' "$WORKSPACE/checkin.sh"
 
 echo -e "✅ \e[32mMDM Agent configured.\e[0m"
 echo -e "   \e[1;33mIMPORTANT: Your authentication token is ->\e[0m $MDM_TOKEN"
@@ -70,7 +76,7 @@ echo ""
 # -----------------------------------------------------------------------------
 echo -e "\e[1;34m[3/4] Pre-Boot Network Unlock (Dropbear & WiFi)\e[0m"
 echo "This allows you to SSH into the laptop to type the LUKS password or trigger MDM."
-read -p "Enter your home WiFi SSID: " WIFI_SSID
+read -r -p "Enter your home WiFi SSID: " WIFI_SSID
 read -rs -p "Enter your home WiFi Password: " WIFI_PASS
 echo
 
