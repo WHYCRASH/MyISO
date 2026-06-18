@@ -81,11 +81,18 @@ def decrypt_secrets_archive(enc_file):
         
     # Correct ownership and permissions of home directory files
     print("Correcting ownership to user shane (1000:1000)...")
-    os.system("chown -R 1000:1000 /target/home/shane/")
+    res_chown = subprocess.run(["chown", "-R", "1000:1000", "/target/home/shane/"], capture_output=True, text=True)
+    if res_chown.returncode != 0:
+        print(f"Warning: chown failed: {res_chown.stderr.strip()}")
     
     # Enforce strict 600 permissions for ingested secrets
-    os.system("find /target/home/shane/ -name 'rclone.conf' -exec chmod 600 {} +")
-    os.system("find /target/home/shane/ -name 'claude.json' -exec chmod 600 {} +")
+    res_chmod1 = subprocess.run(["find", "/target/home/shane/", "-name", "rclone.conf", "-exec", "chmod", "600", "{}", "+"], capture_output=True, text=True)
+    if res_chmod1.returncode != 0:
+        print(f"Warning: chmod rclone.conf failed: {res_chmod1.stderr.strip()}")
+
+    res_chmod2 = subprocess.run(["find", "/target/home/shane/", "-name", "claude.json", "-exec", "chmod", "600", "{}", "+"], capture_output=True, text=True)
+    if res_chmod2.returncode != 0:
+        print(f"Warning: chmod claude.json failed: {res_chmod2.stderr.strip()}")
     
     print("Secrets decryption and ingestion completed successfully.")
     return True
