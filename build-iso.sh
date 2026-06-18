@@ -12,6 +12,7 @@ BUILD_DIR="$WORKSPACE/build"
 OUTPUT_DIR="$WORKSPACE/output"
 CUSTOM_ISO="$OUTPUT_DIR/ubuntu-26.04-custom-latitude5410.iso"
 
+TIMEOUT="2"
 # Base ISO configuration (Ubuntu 26.04 LTS / current server ISO - no codename yet)
 UBUNTU_DAILY_URL="https://cdimage.ubuntu.com/ubuntu-server/daily-live/current/"
 
@@ -97,7 +98,7 @@ patch_boot_configs() {
     sed -i 's|\(linux\s\+/casper/[a-zA-Z0-9.-]\+\)\s\+\(.*\)$|\1 autoinstall ds=nocloud\\;s=/cdrom/ console=ttyS0 \2|g' "$BUILD_DIR/grub.cfg"
     
     # Set immediate default boot timeout
-    sed -i 's/timeout=[0-9]\+/timeout=2/g' "$BUILD_DIR/grub.cfg"
+    sed -i "s/timeout=[0-9]\+/timeout=${TIMEOUT}/g" "$BUILD_DIR/grub.cfg"
     
     # Modify isolinux legacy BIOS config if present
     if [ "$has_isolinux" = "true" ] && [ -f "$BUILD_DIR/txt.cfg" ]; then
