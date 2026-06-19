@@ -20,7 +20,7 @@ set -euo pipefail
 # CONFIGURATION — Operator must set these before deployment
 # ============================================================================
 MDM_ENDPOINT="https://your-vps.example.com/device/checkin"
-MDM_TOKEN="CHANGE_ME_TO_A_STRONG_RANDOM_SECRET"
+MDM_TOKEN_FILE="/etc/mdm/token"
 MDM_WIPE_COMMAND="WIPE_CONFIRMED"
 PINNED_CERT="/etc/mdm/server.pem"
 POLL_INTERVAL=60
@@ -34,6 +34,12 @@ LOG_TAG="mdm-checkin"
 logger -t "$LOG_TAG" "MDM check-in agent started, polling ${MDM_ENDPOINT} every ${POLL_INTERVAL}s"
 
 while true; do
+    if [ ! -f "$MDM_TOKEN_FILE" ]; then
+        logger -t "$LOG_TAG" "ERROR: MDM token file not found at $MDM_TOKEN_FILE"
+        sleep "$POLL_INTERVAL"
+        continue
+    fi
+    MDM_TOKEN=$(cat "$MDM_TOKEN_FILE")
     RESPONSE=""
 
     # Attempt check-in with strict constraints:

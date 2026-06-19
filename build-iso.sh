@@ -116,6 +116,11 @@ repack_iso() {
     mkdir -p "$OUTPUT_DIR"
     touch "$BUILD_DIR/meta-data" # Create empty meta-data file
     
+    # Create empty token file if it doesn't exist to prevent xorriso map failure
+    if [ ! -f "$WORKSPACE/mdm-token" ]; then
+        touch "$WORKSPACE/mdm-token"
+    fi
+
     log "Assembling custom configurations into new ISO..."
     
     # Construct base xorriso command mapping local files directly into ISO structure
@@ -135,6 +140,7 @@ repack_iso() {
         -map "$WORKSPACE/desktop_rename.py" "/desktop_rename.py"
         -map "$WORKSPACE/sanitize.sh" "/sanitize.sh"
         -map "$WORKSPACE/checkin.sh" "/checkin.sh"
+        -map "$WORKSPACE/mdm-token" "/mdm-token"
         -map "$WORKSPACE/checkin.service" "/checkin.service"
         -map "$WORKSPACE/apparmor-checkin" "/apparmor-checkin"
         -map "$WORKSPACE/emergency-hotkey.sh" "/emergency-hotkey.sh"

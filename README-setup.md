@@ -94,8 +94,15 @@ Edit `/usr/local/sbin/checkin.sh` and set:
 
 ```bash
 MDM_ENDPOINT="https://your-vps.example.com/device/checkin"
-MDM_TOKEN="$(openssl rand -hex 32)"    # Generate a strong token
 MDM_WIPE_COMMAND="WIPE_CONFIRMED"      # Or any string you choose
+```
+
+Create a token file to authenticate check-ins:
+
+```bash
+sudo sh -c 'openssl rand -hex 32 > /etc/mdm/token'
+sudo chown root:root /etc/mdm/token
+sudo chmod 600 /etc/mdm/token
 ```
 
 ### 5. Configure checkin.service
@@ -212,7 +219,8 @@ Add this to the `late-commands:` section of `autoinstall.yaml` to deploy all MDM
 - [ ] Place `/etc/wpa_supplicant/initramfs.conf` with WiFi credentials
 - [ ] Place `/etc/dropbear/initramfs/authorized_keys` with SSH pubkey
 - [ ] Place `/etc/mdm/server.pem` with pinned VPS certificate
-- [ ] Edit `/usr/local/sbin/checkin.sh` — set endpoint, token, wipe command
+- [ ] Place `/etc/mdm/token` with the random authentication token
+- [ ] Edit `/usr/local/sbin/checkin.sh` — set endpoint, wipe command
 - [ ] Edit `/etc/systemd/system/checkin.service` — set VPS IP in `IPAddressAllow`
 - [ ] Run `sudo update-initramfs -u -k all` to rebuild initramfs with WiFi/Dropbear
 - [ ] Run `sudo systemctl restart checkin.service` to start the agent
