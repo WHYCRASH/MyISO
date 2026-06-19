@@ -540,15 +540,15 @@ SHORTCUT
       
       # CRITICAL BUGFIX: Temporarily comment out / and /home in fstab so the recovery
       # OS systemd doesn't try to shadow-mount the overlay root with the LUKS partition
-      sed -i -E 's|^([^#].* / btrfs .*)$|# \1|' /target/etc/fstab
-      sed -i -E 's|^([^#].* /home btrfs .*)$|# \1|' /target/etc/fstab
+      sed -i -E 's|^([^#].*[[:space:]]+/[[:space:]]+btrfs[[:space:]]+.*)$|# \1|' /target/etc/fstab
+      sed -i -E 's|^([^#].*[[:space:]]+/home[[:space:]]+btrfs[[:space:]]+.*)$|# \1|' /target/etc/fstab
       
       mksquashfs /target /mnt/recovery/root.squashfs -comp xz -no-exports -no-sparse \
           -e boot/* dev/* proc/* sys/* run/* mnt/* media/* tmp/* recovery/* target/*
           
       # Restore fstab
-      sed -i -E 's|^# ([^#].* / btrfs .*)$|\1|' /target/etc/fstab
-      sed -i -E 's|^# ([^#].* /home btrfs .*)$|\1|' /target/etc/fstab
+      sed -i -E 's|^# ([^#].*[[:space:]]+/[[:space:]]+btrfs[[:space:]]+.*)$|\1|' /target/etc/fstab
+      sed -i -E 's|^# ([^#].*[[:space:]]+/home[[:space:]]+btrfs[[:space:]]+.*)$|\1|' /target/etc/fstab
       
       umount /mnt/recovery
       
