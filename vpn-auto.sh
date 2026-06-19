@@ -67,19 +67,23 @@ FILTERED_SERVERS=()
 FAVORED_SERVERS=()
 
 if [ -n "$US_SERVERS" ]; then
+    # Optimization: Use native bash parameter expansion and regex to extract state
+    # and filter servers instead of spawning 'cut' and 'grep' subshells in the loop.
+    # This avoids thousands of subshell forks and speeds up processing significantly.
     for server in $US_SERVERS; do
         # Extract state code (e.g., US-WA#10 -> WA)
-        state=$(echo "$server" | cut -d'-' -f2 | cut -d'#' -f1)
+        state="${server#US-}"
+        state="${state%%#*}"
         
         # Check against exclusions
-        if echo "$state" | grep -q -E "$EXCLUDED_STATES"; then
+        if [[ "$state" =~ ^($EXCLUDED_STATES)$ ]]; then
             continue
         fi
         
         FILTERED_SERVERS+=("$server")
         
         # Check against favorites
-        if echo "$state" | grep -q -E "$FAVORED_STATES"; then
+        if [[ "$state" =~ ^($FAVORED_STATES)$ ]]; then
             FAVORED_SERVERS+=("$server")
         fi
     done
