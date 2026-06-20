@@ -46,12 +46,20 @@ log "Fetching available server list..."
 SERVERS=""
 if command -v protonvpn-cli &>/dev/null; then
     # Parse server list from protonvpn-cli
-    SERVERS=$(protonvpn-cli servers 2>/dev/null || true)
+    if ! SERVERS=$(protonvpn-cli servers 2>&1); then
+        log "Warning: protonvpn-cli servers failed: $SERVERS"
+        SERVERS=""
+    fi
 fi
 
 if [ -z "$SERVERS" ] && command -v protonvpn &>/dev/null; then
     # Try alternative output format or commands if using v4 CLI
-    SERVERS=$(protonvpn status --help &>/dev/null && protonvpn status || true)
+    if protonvpn status --help &>/dev/null; then
+        if ! SERVERS=$(protonvpn status 2>&1); then
+            log "Warning: protonvpn status failed: $SERVERS"
+            SERVERS=""
+        fi
+    fi
 fi
 
 # Fallback: If no server list can be fetched or parsed, we'll use a pre-defined list of US states.
