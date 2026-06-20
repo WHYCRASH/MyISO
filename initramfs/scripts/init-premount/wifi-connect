@@ -83,11 +83,16 @@ wpa_supplicant -B -i "$WIFI_IFACE" -c "$WPA_CONF" -D nl80211,wext 2>/dev/null ||
 WAITED=0
 ASSOCIATED=false
 while [ "$WAITED" -lt "$WIFI_TIMEOUT" ]; do
-    STATUS=$(wpa_cli -i "$WIFI_IFACE" status 2>/dev/null | grep "^wpa_state=" | cut -d= -f2)
-    if [ "$STATUS" = "COMPLETED" ]; then
-        ASSOCIATED=true
-        break
-    fi
+    # ⚡ Bolt: Replaced expensive 'grep' and 'cut' subprocesses with native POSIX case globbing.
+    # Impact: Avoids spawning 2 external processes per second per loop iteration.
+    # Reduces CPU overhead and speeds up the initramfs boot phase.
+    STATUS_OUT=$(wpa_cli -i "$WIFI_IFACE" status 2>/dev/null)
+    case "$STATUS_OUT" in
+        *"wpa_state=COMPLETED"*)
+            ASSOCIATED=true
+            break
+            ;;
+    esac
     sleep 1
     WAITED=$((WAITED + 1))
 done
