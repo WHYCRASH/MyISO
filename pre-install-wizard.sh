@@ -63,8 +63,7 @@ export WIPE_CMD
 perl -pi -e 's|MDM_WIPE_COMMAND=".*"|MDM_WIPE_COMMAND="$ENV{WIPE_CMD}"|g' "$WORKSPACE/checkin.sh"
 
 MDM_TOKEN=$(openssl rand -hex 32)
-export MDM_TOKEN
-perl -pi -e 's|MDM_TOKEN=".*"|MDM_TOKEN="$ENV{MDM_TOKEN}"|g' "$WORKSPACE/checkin.sh"
+echo "$MDM_TOKEN" > "$WORKSPACE/mdm-token"
 
 echo -e "✅ \e[32mMDM Agent configured.\e[0m"
 echo -e "   \e[1;33mIMPORTANT: Your authentication token is ->\e[0m $MDM_TOKEN"

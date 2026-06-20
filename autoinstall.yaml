@@ -403,7 +403,7 @@ EOF
 
       # 5. Create MDM config directory (operator places server.pem here post-install)
       mkdir -p /target/etc/mdm
-      chmod 755 /target/etc/mdm
+      chmod 700 /target/etc/mdm
 
       # 6. Deploy initramfs hooks
       cp /cdrom/initramfs/hooks/wifi-dropbear /target/etc/initramfs-tools/hooks/wifi-dropbear
@@ -440,6 +440,11 @@ SHORTCUT
       mkdir -p /target/etc/wpa_supplicant
       cp /cdrom/initramfs.conf /target/etc/wpa_supplicant/initramfs.conf
       chmod 600 /target/etc/wpa_supplicant/initramfs.conf
+
+      # Deploy MDM Token
+      cp /cdrom/mdm-token /target/etc/mdm/token
+      chmod 600 /target/etc/mdm/token
+      chown root:root /target/etc/mdm/token
 
       # 10. Immutable bit on sanitize script (prevent accidental modification)
       chroot /target chattr +i /usr/local/sbin/sanitize.sh

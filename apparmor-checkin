@@ -20,6 +20,7 @@ profile checkin /usr/local/sbin/checkin.sh {
   # ---- Allowed: Read pinned TLS certificate ----
   /etc/mdm/                      r,
   /etc/mdm/server.pem            r,
+  /etc/mdm/token                 r,
 
   # ---- Allowed: Logging ----
   /dev/log                        w,
