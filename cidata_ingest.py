@@ -84,8 +84,16 @@ def decrypt_secrets_archive(enc_file):
     os.system("chown -R 1000:1000 /target/home/shane/")
     
     # Enforce strict 600 permissions for ingested secrets
-    os.system("find /target/home/shane/ -name 'rclone.conf' -exec chmod 600 {} +")
-    os.system("find /target/home/shane/ -name 'claude.json' -exec chmod 600 {} +")
+    # ⚡ Bolt: Replaced external find/chmod subprocesses with native python os.walk.
+    # Impact: Avoids spawning multiple subshells and redundant directory traversals, significantly speeding up ingestion.
+    target_dir = '/target/home/shane/'
+    for root, dirs, files in os.walk(target_dir):
+        for file in files:
+            if file in ('rclone.conf', 'claude.json'):
+                try:
+                    os.chmod(os.path.join(root, file), 0o600)
+                except OSError as e:
+                    print(f"Warning: could not set permissions for {file}: {e}")
     
     print("Secrets decryption and ingestion completed successfully.")
     return True
