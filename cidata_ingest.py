@@ -81,11 +81,20 @@ def decrypt_secrets_archive(enc_file):
         
     # Correct ownership and permissions of home directory files
     print("Correcting ownership to user shane (1000:1000)...")
-    os.system("chown -R 1000:1000 /target/home/shane/")
-    
-    # Enforce strict 600 permissions for ingested secrets
-    os.system("find /target/home/shane/ -name 'rclone.conf' -exec chmod 600 {} +")
-    os.system("find /target/home/shane/ -name 'claude.json' -exec chmod 600 {} +")
+    # ⚡ Bolt: Replaced os.system("chown/find") subshells with native os.walk for better performance
+    for root, dirs, files in os.walk('/target/home/shane/'):
+        try:
+            os.chown(root, 1000, 1000)
+        except OSError:
+            pass
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                os.chown(path, 1000, 1000)
+                if name in ('rclone.conf', 'claude.json'):
+                    os.chmod(path, 0o600)
+            except OSError:
+                pass
     
     print("Secrets decryption and ingestion completed successfully.")
     return True
