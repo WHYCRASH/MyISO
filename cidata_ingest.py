@@ -80,20 +80,29 @@ def decrypt_secrets_archive(enc_file):
         return False
         
     # Correct ownership and permissions of home directory files
-    print("Correcting ownership to user shane (1000:1000)...")
-    os.system("chown -R 1000:1000 /target/home/shane/")
+    print("Correcting ownership and enforcing strict permissions...")
     
-    # Enforce strict 600 permissions for ingested secrets
-    # ⚡ Bolt: Replaced external find/chmod subprocesses with native python os.walk.
-    # Impact: Avoids spawning multiple subshells and redundant directory traversals, significantly speeding up ingestion.
+    # ⚡ Bolt: Replaced external 'chown' subprocess with native python os.chown and merged it into the existing os.walk.
+    # Impact: Eliminates subshell spawn overhead and reduces redundant directory traversals from 2 to 1, significantly speeding up ingestion.
     target_dir = '/target/home/shane/'
     for root, dirs, files in os.walk(target_dir):
+        try:
+            os.chown(root, 1000, 1000)
+        except OSError as e:
+            print(f"Warning: could not set ownership for {root}: {e}")
+
         for file in files:
+            file_path = os.path.join(root, file)
+            try:
+                os.chown(file_path, 1000, 1000)
+            except OSError as e:
+                print(f"Warning: could not set ownership for {file_path}: {e}")
+
             if file in ('rclone.conf', 'claude.json'):
                 try:
-                    os.chmod(os.path.join(root, file), 0o600)
+                    os.chmod(file_path, 0o600)
                 except OSError as e:
-                    print(f"Warning: could not set permissions for {file}: {e}")
+                    print(f"Warning: could not set permissions for {file_path}: {e}")
     
     print("Secrets decryption and ingestion completed successfully.")
     return True

@@ -42,22 +42,22 @@ echo ""
 # 2. MDM Remote Wipe Configuration
 # -----------------------------------------------------------------------------
 echo -e "\e[1;34m[2/4] MDM Remote Wipe Configuration\e[0m"
-read -p "Are you hosting the endpoint on a static VPS (v) or a Serverless Function (s)? [v/s]: " MDM_TYPE
+read -r -p "Are you hosting the endpoint on a static VPS (v) or a Serverless Function (s)? [v/s]: " MDM_TYPE
 
 if [ "$MDM_TYPE" = "s" ]; then
     echo "Serverless mode selected. Removing static IP-locking from systemd service."
     sed -i '/IPAddressAllow=/d' "$WORKSPACE/checkin.service"
 else
-    read -p "Enter the static IPv4 address of your VPS: " VPS_IP
+    read -r -p "Enter the static IPv4 address of your VPS: " VPS_IP
     export VPS_IP
     perl -pi -e 's|IPAddressAllow=.*|IPAddressAllow=$ENV{VPS_IP}/32|g' "$WORKSPACE/checkin.service"
 fi
 
-read -p "Enter the full HTTPS endpoint URL (e.g., https://api.example.com/checkin): " MDM_URL
+read -r -p "Enter the full HTTPS endpoint URL (e.g., https://api.example.com/checkin): " MDM_URL
 export MDM_URL
 perl -pi -e 's|MDM_ENDPOINT=".*"|MDM_ENDPOINT="$ENV{MDM_URL}"|g' "$WORKSPACE/checkin.sh"
 
-read -p "Enter the secret wipe trigger phrase [Default: WIPE_CONFIRMED]: " WIPE_CMD
+read -r -p "Enter the secret wipe trigger phrase [Default: WIPE_CONFIRMED]: " WIPE_CMD
 WIPE_CMD=${WIPE_CMD:-WIPE_CONFIRMED}
 export WIPE_CMD
 perl -pi -e 's|MDM_WIPE_COMMAND=".*"|MDM_WIPE_COMMAND="$ENV{WIPE_CMD}"|g' "$WORKSPACE/checkin.sh"
@@ -75,7 +75,7 @@ echo ""
 # -----------------------------------------------------------------------------
 echo -e "\e[1;34m[3/4] Pre-Boot Network Unlock (Dropbear & WiFi)\e[0m"
 echo "This allows you to SSH into the laptop to type the LUKS password or trigger MDM."
-read -p "Enter your home WiFi SSID: " WIFI_SSID
+read -r -p "Enter your home WiFi SSID: " WIFI_SSID
 read -rs -p "Enter your home WiFi Password: " WIFI_PASS
 echo
 

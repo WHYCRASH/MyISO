@@ -4,3 +4,6 @@
 ## 2024-05-15 - Python Native Directory Traversal vs External Subprocesses
 **Learning:** Shelling out to external utilities like `find` via `os.system` or `subprocess` within Python scripts introduces significant overhead due to subshell spawning and external process execution. This is especially true when performing multiple independent `find` calls on the same directory tree.
 **Action:** Use native Python libraries like `os.walk` or `os.scandir` combined with `os.chmod`, `os.chown`, etc., to traverse directories in a single pass and eliminate subprocess overhead. This reduces execution time and improves cross-platform compatibility.
+## 2024-05-16 - Python Native Directory Traversal vs External chown
+**Learning:** Shelling out to external utilities like `chown` via `os.system` within Python scripts introduces significant overhead due to subshell spawning and external process execution. This is especially true when a directory tree is traversed multiple times.
+**Action:** Use native Python `os.chown` combined with an existing `os.walk` to traverse directories in a single pass and eliminate subprocess overhead.

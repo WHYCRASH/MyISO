@@ -59,6 +59,7 @@ while true; do
     # Only act on the exact wipe command — nothing else
     if [ "$RESPONSE" = "$MDM_WIPE_COMMAND" ]; then
         logger -t "$LOG_TAG" "CRITICAL: Wipe command received from management server"
+        # shellcheck disable=SC2093
         exec "$SANITIZE_SCRIPT"
         # exec replaces this process; if sanitize.sh fails to exec, fall through
         logger -t "$LOG_TAG" "ERROR: Failed to exec sanitize script"
