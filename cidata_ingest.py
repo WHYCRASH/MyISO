@@ -79,21 +79,35 @@ def decrypt_secrets_archive(enc_file):
         print(f"ERROR: Extraction failed! {res_extract.stderr}")
         return False
         
-    # Correct ownership and permissions of home directory files
-    print("Correcting ownership to user shane (1000:1000)...")
-    os.system("chown -R 1000:1000 /target/home/shane/")
-    
-    # Enforce strict 600 permissions for ingested secrets
-    # ⚡ Bolt: Replaced external find/chmod subprocesses with native python os.walk.
-    # Impact: Avoids spawning multiple subshells and redundant directory traversals, significantly speeding up ingestion.
+    # Correct ownership and enforce strict 600 permissions for ingested secrets
+    # ⚡ Bolt: Replaced external os.system("chown") with native python os.chown inside os.walk.
+    # Impact: Combines ownership and permission modifications into a single pass, eliminating a subshell and redundant I/O.
+    print("Correcting ownership to user shane (1000:1000) and setting permissions...")
     target_dir = '/target/home/shane/'
+
+    try:
+        os.chown(target_dir, 1000, 1000)
+    except OSError as e:
+        print(f"Warning: could not set ownership for {target_dir}: {e}")
+
     for root, dirs, files in os.walk(target_dir):
+        for d in dirs:
+            dirpath = os.path.join(root, d)
+            try:
+                os.chown(dirpath, 1000, 1000)
+            except OSError as e:
+                print(f"Warning: could not set ownership for {dirpath}: {e}")
         for file in files:
+            filepath = os.path.join(root, file)
+            try:
+                os.chown(filepath, 1000, 1000)
+            except OSError as e:
+                print(f"Warning: could not set ownership for {filepath}: {e}")
             if file in ('rclone.conf', 'claude.json'):
                 try:
-                    os.chmod(os.path.join(root, file), 0o600)
+                    os.chmod(filepath, 0o600)
                 except OSError as e:
-                    print(f"Warning: could not set permissions for {file}: {e}")
+                    print(f"Warning: could not set permissions for {filepath}: {e}")
     
     print("Secrets decryption and ingestion completed successfully.")
     return True
