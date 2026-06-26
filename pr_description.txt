@@ -1,0 +1,7 @@
+💡 What: Replaced the external `os.system("chown -R 1000:1000 /target/home/shane/")` call in `cidata_ingest.py` with a native Python implementation using `os.walk` and `os.lchown`.
+
+🎯 Why: Shelling out to `chown` creates unnecessary subprocess spawn overhead. Further, since the code was immediately following up with a native `os.walk` loop to apply restrictive `chmod` permissions to specific secrets files (`rclone.conf`, `claude.json`), it was forcing the system to traverse the `/target/home/shane` directory tree twice. By merging the ownership and permission logic into a single native `os.walk` traversal pass, we eliminate the subprocess fork and reduce filesystem I/O operations. `os.lchown` was chosen over `os.chown` to safely mirror `chown -R`'s behavior of ignoring symlink targets by default.
+
+📊 Impact: Reduces directory traversals for ingested secrets from 2x to 1x and removes the overhead of a system fork.
+
+🔬 Measurement: Verify by executing the `cidata_ingest.py` tests with `python3 -m pytest` and ensuring correct ownership mapping against test stubs.
