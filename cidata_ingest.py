@@ -80,20 +80,32 @@ def decrypt_secrets_archive(enc_file):
         return False
         
     # Correct ownership and permissions of home directory files
-    print("Correcting ownership to user shane (1000:1000)...")
-    os.system("chown -R 1000:1000 /target/home/shane/")
-    
-    # Enforce strict 600 permissions for ingested secrets
-    # ⚡ Bolt: Replaced external find/chmod subprocesses with native python os.walk.
-    # Impact: Avoids spawning multiple subshells and redundant directory traversals, significantly speeding up ingestion.
+    # ⚡ Bolt: Unified directory traversal for both ownership and permissions.
+    # Impact: Eliminates subshell spawn overhead for `chown -R` and prevents redundant I/O passes.
+    # Uses `os.lchown` instead of `os.chown` to prevent following symlinks.
+    print("Correcting ownership to user shane (1000:1000) and enforcing permissions...")
     target_dir = '/target/home/shane/'
+
+    try:
+        os.lchown(target_dir, 1000, 1000)
+    except OSError as e:
+        print(f"Warning: could not set ownership for {target_dir}: {e}")
+
     for root, dirs, files in os.walk(target_dir):
+        for d in dirs:
+            dir_path = os.path.join(root, d)
+            try:
+                os.lchown(dir_path, 1000, 1000)
+            except OSError as e:
+                print(f"Warning: could not set ownership for {dir_path}: {e}")
         for file in files:
-            if file in ('rclone.conf', 'claude.json'):
-                try:
-                    os.chmod(os.path.join(root, file), 0o600)
-                except OSError as e:
-                    print(f"Warning: could not set permissions for {file}: {e}")
+            file_path = os.path.join(root, file)
+            try:
+                os.lchown(file_path, 1000, 1000)
+                if file in ('rclone.conf', 'claude.json'):
+                    os.chmod(file_path, 0o600)
+            except OSError as e:
+                print(f"Warning: could not set ownership/permissions for {file_path}: {e}")
     
     print("Secrets decryption and ingestion completed successfully.")
     return True
@@ -129,10 +141,10 @@ def _write_single_file(file_info):
         user, group = owner.split(':')
         uid = 1000 if user == 'shane' else 0
         gid = 1000 if group == 'shane' else 0
-        os.chown(target_path, uid, gid)
+        os.lchown(target_path, uid, gid)
         parent_dir = os.path.dirname(target_path)
         while parent_dir != '/target/home' and parent_dir != '/target' and parent_dir != '/':
-            os.chown(parent_dir, uid, gid)
+            os.lchown(parent_dir, uid, gid)
             parent_dir = os.path.dirname(parent_dir)
     except Exception as e:
         print(f"Warning: could not set ownership for {target_path}: {e}")
